@@ -76,7 +76,7 @@ async function load(){
   const r=await fetch(api()+"?t="+Date.now(),{headers:hdr()});
   if(r.status==404){db={entries:[],items:[]};sha=null;return}
   if(!r.ok)throw new Error(r.status==401||r.status==403?"Token not allowed. Check token and repo access.":"Could not load data ("+r.status+")");
-  const j=await r.json();sha=j.sha;db=JSON.parse(dec(j.content));db.entries=db.entries||[];db.items=db.items||[];
+  const j=await r.json();sha=j.sha;const t=dec(j.content||"").trim();try{db=t?JSON.parse(t):{}}catch(x){throw new Error("data.json is not valid JSON. Open it on GitHub: it should be empty or start with {")}if(Array.isArray(db))db={entries:db};db.entries=db.entries||[];db.items=db.items||[];
 }
 async function save(mutate,tries=2){
   await load();mutate();
