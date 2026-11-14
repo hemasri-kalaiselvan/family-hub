@@ -32,6 +32,7 @@ label{font-size:14px;color:var(--mut)}
 .tabs{display:flex;gap:6px;margin-bottom:10px}
 .tabs .chip{flex:1;text-align:center}
 #msg{position:fixed;left:0;right:0;top:0;background:var(--bad);color:#fff;padding:8px;text-align:center;display:none;z-index:9}
+.nav{display:flex;gap:6px;overflow-x:auto;margin-bottom:10px}.nav .chip{white-space:nowrap}.bar{height:6px;background:var(--line);border-radius:4px;margin-top:6px}.bar i{display:block;height:100%;background:var(--acc);border-radius:4px}
 </style>
 </head>
 <body>
@@ -73,9 +74,9 @@ const dec=b=>decodeURIComponent(escape(atob(b.replace(/\n/g,""))));
 const enc=s=>btoa(unescape(encodeURIComponent(s)));
 async function load(){
   const r=await fetch(api()+"?t="+Date.now(),{headers:hdr()});
-  if(r.status==404){db={entries:[]};sha=null;return}
+  if(r.status==404){db={entries:[],items:[]};sha=null;return}
   if(!r.ok)throw new Error(r.status==401||r.status==403?"Token not allowed. Check token and repo access.":"Could not load data ("+r.status+")");
-  const j=await r.json();sha=j.sha;db=JSON.parse(dec(j.content));db.entries=db.entries||[];
+  const j=await r.json();sha=j.sha;db=JSON.parse(dec(j.content));db.entries=db.entries||[];db.items=db.items||[];
 }
 async function save(mutate,tries=2){
   await load();mutate();
@@ -107,8 +108,7 @@ async function start(){$("#app").innerHTML='<p class="mut">Loading…</p>';await
 
 /* ---------- Views ---------- */
 function monthEntries(){return db.entries.filter(e=>e.date.startsWith(month)).sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id)}
-function render(){
-  if(!cfg)return setup();
+function renderExp(){
   const es=monthEntries(),tot=es.reduce((s,e)=>s+e.amount,0);
   let h=`<div class="row"><h1>Family Expenses</h1><button class="btn g" onclick="setup()">Setup</button></div>
   <div class="row"><input type="month" value="${month}" onchange="month=this.value;render()" style="width:auto">
@@ -120,7 +120,7 @@ function render(){
   <div class="chip" onclick="exportCsv()">Export</div></div>`;
   if(!es.length)h+=`<p class="mut">No entries this month. Tap + to add one.</p>`;
   else h+=tab=="sum"?summary(es):list(es);
-  $("#app").innerHTML=h+`<button class="fab" onclick="openForm()">+</button>`;
+  return h;
 }
 function byWho(es){
   const m={};es.forEach(e=>m[e.by]=(m[e.by]||0)+e.amount);
@@ -136,6 +136,57 @@ function list(es){
   return es.map(e=>`<div class="card" onclick="openForm(${e.id})"><div class="row"><b>${esc(e.cat)}${e.subs?.length?" · "+esc(e.subs.join(" + ")):""}</b><b>${inr(e.amount)}</b></div>
   <div class="mut">${e.date} · ${esc(e.by)} · ${esc(e.mode)}${e.note?" · "+esc(e.note):""}</div></div>`).join("");
 }
+
+/* ---------- Other sections ---------- */
+let sec="exp",F2=null;
+const SEC=[["exp","Expenses"],["invest","Invest"],["insure","Insurance"],["wish","Wishlist"],["trip","Trips"],["bucket","Bucket list"]];
+const SC={
+ invest:{n:"investment",f:[["name","Name (e.g. SBI SIP)","text"],["kind","Type","sel",["SIP","FD","Gold","Chit","Stocks","PPF/EPF","Other"]],["amt","Invested (₹)","num"],["cur","Current value (₹)","num"],["by","Whose","text"],["note","Note","text"]]},
+ insure:{n:"policy",f:[["name","Policy name","text"],["kind","Type","sel",["Health","Life","Vehicle","Other"]],["prem","Premium (₹)","num"],["due","Next due date","date"],["by","Covers","text"],["note","Policy no. / note","text"]]},
+ wish:{n:"wish",f:[["name","Item","text"],["cost","Estimated cost (₹)","num"],["saved","Saved so far (₹)","num"],["due","Target date","date"],["note","Note","text"]]},
+ trip:{n:"trip",f:[["name","Destination","text"],["from","From","date"],["to","To","date"],["cost","Budget (₹)","num"],["saved","Saved so far (₹)","num"],["note","Plan / checklist","area"]]},
+ bucket:{n:"dream",f:[["name","Dream","text"],["note","Note","text"]]}
+};
+const sum=(a,k)=>a.reduce((s,x)=>s+(+x[k]||0),0);
+const daysTo=d=>d?Math.ceil((new Date(d)-new Date(new Date().toDateString()))/864e5):null;
+function render(){
+  if(!cfg)return setup();
+  const nav=`<div class="nav">${SEC.map(([k,n])=>`<div class="chip ${sec==k?"on":""}" onclick="sec='${k}';render()">${n}</div>`).join("")}<div class="chip" onclick="setup()">⚙</div></div>`;
+  $("#app").innerHTML=nav+(sec=="exp"?renderExp():renderSec())+`<button class="fab" onclick="${sec=="exp"?"openForm()":"openItem()"}">+</button>`;
+}
+function renderSec(){
+  const it=db.items.filter(x=>x.type==sec).sort(sec=="insure"?(a,b)=>(a.due||"9").localeCompare(b.due||"9"):(a,b)=>(a.done?1:0)-(b.done?1:0)||a.id-b.id);
+  let t="",s="";
+  if(sec=="invest"){const i=sum(it,"amt"),v=it.reduce((a,x)=>a+(+(x.cur||x.amt)||0),0);t="Current value";s=inr(v);var sm=`Invested ${inr(i)} · Gain ${inr(v-i)}`}
+  else if(sec=="insure"){t="Premiums listed";s=inr(sum(it,"prem"));sm=it.length+" policies"}
+  else if(sec=="bucket"){t="Done";s=it.filter(x=>x.done).length+" / "+it.length;sm="Tap a dream to edit"}
+  else{t=sec=="trip"?"Trip budgets":"Wishlist total";s=inr(sum(it,"cost"));sm=`Saved ${inr(sum(it,"saved"))}`}
+  return `<div class="card"><div class="mut">${t}</div><div class="big">${s}</div><div class="mut">${sm}</div></div>`+(it.length?it.map(card).join(""):`<p class="mut">Nothing yet. Tap + to add.</p>`);
+}
+function card(x){
+  const d=daysTo(x.due);let r="",s="";
+  if(sec=="invest"){r=inr(x.cur||x.amt||0);s=`${esc(x.kind)} · ${esc(x.by)} · invested ${inr(x.amt||0)}`}
+  else if(sec=="insure"){r=inr(x.prem||0);s=`${esc(x.kind)} · ${esc(x.by)} · due ${x.due||"-"}${d!=null&&d<=30?` <b style="color:var(--bad)">(${d<0?"overdue":d+" days"})</b>`:""}`}
+  else if(sec=="wish"||sec=="trip"){r=inr(x.cost||0);s=`Saved ${inr(x.saved||0)}`+(sec=="trip"?` · ${x.from||""} to ${x.to||""}`:x.due?` · by ${x.due}`:"")}
+  const p=(x.cost>0&&(sec=="wish"||sec=="trip"))?`<div class="bar"><i style="width:${Math.min(100,(x.saved||0)/x.cost*100)}%"></i></div>`:"";
+  const ck=(sec=="invest"||sec=="insure")?"":`<input type="checkbox" style="width:auto;margin:0" ${x.done?"checked":""} onclick="event.stopPropagation();flip(${x.id})">`;
+  return `<div class="card" onclick="openItem(${x.id})"><div class="row"><div style="flex:1;${x.done?"text-decoration:line-through;opacity:.6":""}"><b>${esc(x.name)}</b><div class="mut">${s||esc(x.note)}</div></div><b>${r}</b>${ck}</div>${p}${x.note&&s?`<div class="sub">${esc(x.note)}</div>`:""}</div>`;
+}
+function openItem(id){
+  const x=id?db.items.find(i=>i.id==id):null;
+  F2=x?{...x}:{type:sec,by:cfg.name};
+  $("#sheet").innerHTML=`<h1>${x?"Edit":"Add"} ${SC[sec].n}</h1>`+SC[sec].f.map(([k,l,t,o],n)=>`<label>${l}</label>`+(t=="sel"?`<select id="i${n}">${o.map(v=>`<option ${F2[k]==v?"selected":""}>${v}</option>`).join("")}</select>`:t=="area"?`<textarea id="i${n}" rows="4">${esc(F2[k])}</textarea>`:`<input id="i${n}" type="${t=="num"?"number":t=="date"?"date":"text"}" ${t=="num"?'inputmode="decimal"':""} value="${esc(F2[k])}">`)).join("")+`<div class="row"><button class="btn" onclick="saveItem()">Save</button><button class="btn g" onclick="closeForm()">Cancel</button>${x?`<button class="btn d" onclick="delItem(${x.id})">Delete</button>`:""}</div>`;
+  $("#modal").classList.add("on");
+}
+function saveItem(){
+  const r={id:F2.id||Date.now(),type:sec,done:!!F2.done};
+  SC[sec].f.forEach(([k,l,t],n)=>{const v=$("#i"+n).value.trim();r[k]=t=="num"?(v===""?"":parseFloat(v)):v});
+  if(!r.name)return err("Enter a name");
+  closeForm();
+  run(()=>save(()=>{const i=db.items.findIndex(x=>x.id==r.id);i<0?db.items.push(r):db.items[i]=r}));
+}
+function flip(id){run(()=>save(()=>{const x=db.items.find(i=>i.id==id);if(x)x.done=!x.done}))}
+function delItem(id){if(!confirm("Delete this?"))return;closeForm();run(()=>save(()=>{db.items=db.items.filter(x=>x.id!=id)}))}
 
 /* ---------- Form ---------- */
 function openForm(id){
