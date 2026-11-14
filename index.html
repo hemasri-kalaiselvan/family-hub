@@ -97,7 +97,7 @@ function setup(){
   <label>Data repo (owner/name)</label><input id="s2" value="${esc(cfg?.repo||"hemasri-kalaiselvan/data")}" placeholder="yourname/data">
   <label>Data file path inside the repo</label><input id="s4" value="${esc(cfg?.path||"family-hub/data.json")}">
   <label>GitHub token (fine-grained, Contents read and write)</label><input id="s3" type="password" value="${esc(cfg?.token||"")}">
-  <button class="btn" onclick="saveCfg()">Save and open</button></div>`;
+  <div class="row" style="justify-content:flex-start"><button class="btn" onclick="saveCfg()">Save and open</button>${cfg?`<button class="btn g" onclick="render()">Cancel</button>`:""}</div></div>`;
 }
 function saveCfg(){
   cfg={name:$("#s1").value.trim(),repo:$("#s2").value.trim(),path:$("#s4").value.trim().replace(/^\/+/,""),token:$("#s3").value.trim()};
