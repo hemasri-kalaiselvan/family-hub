@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Family Expenses</title>
 <style>
-:root{--bg:#f6f3ee;--card:#fff;--ink:#23201c;--mut:#7a736a;--line:#e4ddd2;--acc:#1f6f5c;--acc2:#e8f2ee;--bad:#b3392b}
-@media(prefers-color-scheme:dark){:root{--bg:#171512;--card:#221f1b;--ink:#f1ece4;--mut:#a39a8d;--line:#38332c;--acc:#5cc2a6;--acc2:#1e2f2a;--bad:#e8826f}}
+:root{color-scheme:light;--bg:#f6f3ee;--card:#fff;--ink:#23201c;--mut:#7a736a;--line:#e4ddd2;--acc:#1f6f5c;--acc2:#e8f2ee;--bad:#b3392b}
+:root[data-theme=dark]{color-scheme:dark;--bg:#171512;--card:#221f1b;--ink:#f1ece4;--mut:#a39a8d;--line:#38332c;--acc:#5cc2a6;--acc2:#1e2f2a;--bad:#e8826f}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 Georgia,"Times New Roman",serif;padding-bottom:90px}
 .w{max-width:640px;margin:0 auto;padding:14px}
@@ -61,7 +61,7 @@ const CATS={
 const MODES=["UPI","Cash","Card"];
 const K="fx_cfg";
 let cfg=JSON.parse(localStorage.getItem(K)||"null");
-let db={entries:[]},sha=null,month=new Date().toISOString().slice(0,7),tab="sum",form=null;
+let db={entries:[]},sha=null,month=new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,7),tab="sum",form=null;
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const inr=n=>"₹"+Math.round(n).toLocaleString("en-IN");
@@ -151,7 +151,7 @@ const sum=(a,k)=>a.reduce((s,x)=>s+(+x[k]||0),0);
 const daysTo=d=>d?Math.ceil((new Date(d)-new Date(new Date().toDateString()))/864e5):null;
 function render(){
   if(!cfg)return setup();
-  const nav=`<div class="nav">${SEC.map(([k,n])=>`<div class="chip ${sec==k?"on":""}" onclick="sec='${k}';render()">${n}</div>`).join("")}<div class="chip" onclick="setup()">⚙</div></div>`;
+  const nav=`<div class="nav">${SEC.map(([k,n])=>`<div class="chip ${sec==k?"on":""}" onclick="sec='${k}';render()">${n}</div>`).join("")}<div class="chip" onclick="toggleTheme()">${theme=="dark"?"☀️":"🌙"}</div><div class="chip" onclick="setup()">⚙</div></div>`;
   $("#app").innerHTML=nav+(sec=="exp"?renderExp():renderSec())+`<button class="fab" onclick="${sec=="exp"?"openForm()":"openItem()"}">+</button>`;
 }
 function renderSec(){
@@ -188,30 +188,36 @@ function saveItem(){
 function flip(id){run(()=>save(()=>{const x=db.items.find(i=>i.id==id);if(x)x.done=!x.done}))}
 function delItem(id){if(!confirm("Delete this?"))return;closeForm();run(()=>save(()=>{db.items=db.items.filter(x=>x.id!=id)}))}
 
+const TK="fx_theme",BASE=["Raj","Vetri","Others"];let theme=localStorage.getItem(TK)||"light",PL=[];
+document.documentElement.dataset.theme=theme;
+function toggleTheme(){theme=theme=="dark"?"light":"dark";localStorage.setItem(TK,theme);document.documentElement.dataset.theme=theme;render()}
+function catChange(){const o=form.cat;keep();if(form.cat!=o)form.subs=[];drawForm()}
+function setF(k,v){keep();form[k]=v;drawForm()}
+function setBy(i){setF("by",PL[i])}
 /* ---------- Form ---------- */
 function openForm(id){
   const e=id?db.entries.find(x=>x.id==id):null;
-  form=e?{...e,subs:[...(e.subs||[])]}:{date:new Date().toISOString().slice(0,10),amount:"",cat:"Groceries",subs:[],note:"",by:cfg.name,mode:"UPI"};
+  form=e?{...e,subs:[...(e.subs||[])]}:{date:new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10),amount:"",cat:"Groceries",subs:[],note:"",by:BASE.find(p=>p.toLowerCase()==cfg.name.toLowerCase())||cfg.name,mode:"UPI"};
   drawForm();$("#modal").classList.add("on");
 }
 function drawForm(){
-  const subs=CATS[form.cat]||[];
+  const subs=CATS[form.cat]||[];const m=BASE.find(p=>p.toLowerCase()==(form.by||"").toLowerCase());if(m)form.by=m;PL=BASE.slice();if(form.by&&!m)PL.unshift(form.by);
   $("#sheet").innerHTML=`<h1>${form.id?"Edit":"Add"} expense</h1>
   <label>Date</label><input type="date" id="f1" value="${form.date}">
   <label>Amount (₹)</label><input type="number" inputmode="decimal" id="f2" value="${form.amount}">
-  <label>Category</label><select id="f3" onchange="form.cat=this.value;form.subs=[];keep();drawForm()">${Object.keys(CATS).map(c=>`<option ${c==form.cat?"selected":""}>${c}</option>`).join("")}</select>
+  <label>Category</label><select id="f3" onchange="catChange()" oninput="catChange()">${Object.keys(CATS).map(c=>`<option ${c==form.cat?"selected":""}>${c}</option>`).join("")}</select>
   ${subs.length?`<label>Which ones? Pick any, or none if you only know the total</label><div class="chips">${subs.map(s=>`<div class="chip ${form.subs.includes(s)?"on":""}" onclick="tg('${s}')">${s}</div>`).join("")}</div>`:""}
   <label>Note</label><input id="f4" value="${esc(form.note)}">
-  <label>Paid by</label><input id="f5" value="${esc(form.by)}">
-  <label>Payment mode</label><select id="f6">${MODES.map(m=>`<option ${m==form.mode?"selected":""}>${m}</option>`).join("")}</select>
+  <label>Paid by</label><div class="chips">${PL.map((p,i)=>`<div class="chip ${form.by==p?"on":""}" onclick="setBy(${i})">${esc(p)}</div>`).join("")}</div>
+  <label>Payment mode</label><div class="chips">${MODES.map(m=>`<div class="chip ${form.mode==m?"on":""}" onclick="setF('mode','${m}')">${m}</div>`).join("")}</div>
   <div class="row"><button class="btn" onclick="submitForm()">Save</button><button class="btn g" onclick="closeForm()">Cancel</button>
   ${form.id?`<button class="btn d" onclick="del(${form.id})">Delete</button>`:""}</div>`;
 }
-function keep(){["date:f1","amount:f2","note:f4","by:f5","mode:f6"].forEach(p=>{const[k,i]=p.split(":");const el=$("#"+i);if(el)form[k]=el.value})}
+function keep(){["date:f1","amount:f2","note:f4"].forEach(p=>{const[k,i]=p.split(":");const el=$("#"+i);if(el)form[k]=el.value});const c=$("#f3");if(c)form.cat=c.value}
 function tg(s){keep();const i=form.subs.indexOf(s);i<0?form.subs.push(s):form.subs.splice(i,1);drawForm()}
 function closeForm(){$("#modal").classList.remove("on")}
 function submitForm(){
-  keep();const a=parseFloat(form.amount);
+  keep();form.subs=form.subs.filter(s=>(CATS[form.cat]||[]).includes(s));const a=parseFloat(form.amount);
   if(!(a>0))return err("Enter an amount");
   if(!form.date)return err("Pick a date");
   const rec={id:form.id||Date.now(),date:form.date,amount:a,cat:form.cat,subs:form.subs,note:form.note.trim(),by:form.by.trim()||cfg.name,mode:form.mode};
