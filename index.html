@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Family Expenses</title>
+<style>
+:root{--bg:#f6f3ee;--card:#fff;--ink:#23201c;--mut:#7a736a;--line:#e4ddd2;--acc:#1f6f5c;--acc2:#e8f2ee;--bad:#b3392b}
+@media(prefers-color-scheme:dark){:root{--bg:#171512;--card:#221f1b;--ink:#f1ece4;--mut:#a39a8d;--line:#38332c;--acc:#5cc2a6;--acc2:#1e2f2a;--bad:#e8826f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 Georgia,"Times New Roman",serif;padding-bottom:90px}
+.w{max-width:640px;margin:0 auto;padding:14px}
+h1{font-size:22px;margin:4px 0 12px}
+button,input,select,textarea{font:inherit;color:inherit}
+input,select,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--card);margin:4px 0 10px}
+label{font-size:14px;color:var(--mut)}
+.btn{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:11px 16px;cursor:pointer}
+.btn.g{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn.d{background:transparent;color:var(--bad);border:1px solid var(--line)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.big{font-size:30px;font-weight:bold}
+.mut{color:var(--mut);font-size:14px}
+.sub{padding:3px 0 0 12px;font-size:14px;color:var(--mut)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
+.chip{border:1px solid var(--line);border-radius:20px;padding:6px 12px;background:var(--card);cursor:pointer;font-size:14px}
+.chip.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.fab{position:fixed;right:18px;bottom:18px;width:56px;height:56px;border-radius:50%;font-size:30px;border:0;background:var(--acc);color:#fff;box-shadow:0 3px 10px #0004}
+.modal{position:fixed;inset:0;background:#0008;display:none;align-items:flex-end;justify-content:center;z-index:5}
+.modal.on{display:flex}
+.sheet{background:var(--bg);width:100%;max-width:640px;max-height:92vh;overflow:auto;border-radius:16px 16px 0 0;padding:16px}
+.tabs{display:flex;gap:6px;margin-bottom:10px}
+.tabs .chip{flex:1;text-align:center}
+#msg{position:fixed;left:0;right:0;top:0;background:var(--bad);color:#fff;padding:8px;text-align:center;display:none;z-index:9}
+</style>
+</head>
+<body>
+<div id="msg"></div>
+<div class="w" id="app"></div>
+<div class="modal" id="modal"><div class="sheet" id="sheet"></div></div>
+<script>
+const CATS={
+ "Groceries":["Milk","Vegetables","Fruits","Others"],
+ "Hotel":["Snacks","Breakfast","Lunch","Dinner"],
+ "Maintenance":["House","Car","Bike"],
+ "Petrol":["Car","Bike"],
+ "Ironing":[],"Electricity":[],"Gas":[],
+ "Shopping":["Clothes","Home items","Gadgets"],
+ "Bills":["Mobile","Internet/DTH","Water","Maid/Cook"],
+ "Rent/EMI":[],
+ "Medical":["Doctor","Medicines","Checkup"],
+ "Insurance":["Health","Life","Vehicle"],
+ "Travel":["Trip","Local transport","Toll/Parking"],
+ "Festivals & Gifts":[],
+ "Personal care":[],
+ "Entertainment":["Movies","OTT"],
+ "Savings/Investment":["SIP","Chit","Gold","FD"],
+ "Miscellaneous":[]
+};
+const MODES=["UPI","Cash","Card"];
+const K="fx_cfg";
+let cfg=JSON.parse(localStorage.getItem(K)||"null");
+let db={entries:[]},sha=null,month=new Date().toISOString().slice(0,7),tab="sum",form=null;
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const inr=n=>"₹"+Math.round(n).toLocaleString("en-IN");
+const err=t=>{const m=$("#msg");m.textContent=t;m.style.display="block";setTimeout(()=>m.style.display="none",4500)};
+
+/* ---------- GitHub storage ---------- */
+const api=()=>`https://api.github.com/repos/${cfg.repo}/contents/${cfg.path||"data.json"}`;
+const hdr=()=>({Authorization:"Bearer "+cfg.token,Accept:"application/vnd.github+json"});
+const dec=b=>decodeURIComponent(escape(atob(b.replace(/\n/g,""))));
+const enc=s=>btoa(unescape(encodeURIComponent(s)));
+async function load(){
+  const r=await fetch(api()+"?t="+Date.now(),{headers:hdr()});
+  if(r.status==404){db={entries:[]};sha=null;return}
+  if(!r.ok)throw new Error(r.status==401||r.status==403?"Token not allowed. Check token and repo access.":"Could not load data ("+r.status+")");
+  const j=await r.json();sha=j.sha;db=JSON.parse(dec(j.content));db.entries=db.entries||[];
+}
+async function save(mutate,tries=2){
+  await load();mutate();
+  const body={message:"update by "+cfg.name,content:enc(JSON.stringify(db,null,1))};
+  if(sha)body.sha=sha;
+  const r=await fetch(api(),{method:"PUT",headers:{...hdr(),"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(r.status==409||r.status==422){if(tries>0)return save(mutate,tries-1);throw new Error("Conflict, try again")}
+  if(!r.ok)throw new Error("Save failed ("+r.status+")");
+  sha=(await r.json()).content.sha;
+}
+async function run(fn){try{await fn();}catch(e){err(e.message)}render()}
+
+/* ---------- Setup ---------- */
+function setup(){
+  $("#app").innerHTML=`<h1>Family Expenses</h1><div class="card">
+  <p class="mut">One-time setup on each phone.</p>
+  <label>Your name</label><input id="s1" value="${esc(cfg?.name||"")}" placeholder="e.g. Ravi">
+  <label>Data repo (owner/name)</label><input id="s2" value="${esc(cfg?.repo||"hemasri-kalaiselvan/data")}" placeholder="yourname/data">
+  <label>Data file path inside the repo</label><input id="s4" value="${esc(cfg?.path||"family-hub/data.json")}">
+  <label>GitHub token (fine-grained, Contents read and write)</label><input id="s3" type="password" value="${esc(cfg?.token||"")}">
+  <button class="btn" onclick="saveCfg()">Save and open</button></div>`;
+}
+function saveCfg(){
+  cfg={name:$("#s1").value.trim(),repo:$("#s2").value.trim(),path:$("#s4").value.trim().replace(/^\/+/,""),token:$("#s3").value.trim()};
+  if(!cfg.name||!cfg.repo||!cfg.token)return err("Fill all three fields");
+  localStorage.setItem(K,JSON.stringify(cfg));start();
+}
+async function start(){$("#app").innerHTML='<p class="mut">Loading…</p>';await run(load)}
+
+/* ---------- Views ---------- */
+function monthEntries(){return db.entries.filter(e=>e.date.startsWith(month)).sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id)}
+function render(){
+  if(!cfg)return setup();
+  const es=monthEntries(),tot=es.reduce((s,e)=>s+e.amount,0);
+  let h=`<div class="row"><h1>Family Expenses</h1><button class="btn g" onclick="setup()">Setup</button></div>
+  <div class="row"><input type="month" value="${month}" onchange="month=this.value;render()" style="width:auto">
+  <button class="btn g" onclick="run(load)">Refresh</button></div>
+  <div class="card"><div class="mut">Spent in ${month}</div><div class="big">${inr(tot)}</div>
+  <div class="mut">${["Husband","Wife"].length&&byWho(es)}</div></div>
+  <div class="tabs"><div class="chip ${tab=="sum"?"on":""}" onclick="tab='sum';render()">By category</div>
+  <div class="chip ${tab=="list"?"on":""}" onclick="tab='list';render()">All entries</div>
+  <div class="chip" onclick="exportCsv()">Export</div></div>`;
+  if(!es.length)h+=`<p class="mut">No entries this month. Tap + to add one.</p>`;
+  else h+=tab=="sum"?summary(es):list(es);
+  $("#app").innerHTML=h+`<button class="fab" onclick="openForm()">+</button>`;
+}
+function byWho(es){
+  const m={};es.forEach(e=>m[e.by]=(m[e.by]||0)+e.amount);
+  return Object.entries(m).map(([k,v])=>esc(k)+" "+inr(v)).join("  |  ")||"&nbsp;";
+}
+function summary(es){
+  const g={};
+  es.forEach(e=>{const c=g[e.cat]=g[e.cat]||{t:0,s:{}};c.t+=e.amount;const k=e.subs?.length?e.subs.join(" + "):"Total only";c.s[k]=(c.s[k]||0)+e.amount});
+  return Object.entries(g).sort((a,b)=>b[1].t-a[1].t).map(([k,c])=>`<div class="card"><div class="row"><b>${esc(k)}</b><b>${inr(c.t)}</b></div>`+
+    Object.entries(c.s).map(([s,v])=>`<div class="sub row"><span>${esc(s)}</span><span>${inr(v)}</span></div>`).join("")+`</div>`).join("");
+}
+function list(es){
+  return es.map(e=>`<div class="card" onclick="openForm(${e.id})"><div class="row"><b>${esc(e.cat)}${e.subs?.length?" · "+esc(e.subs.join(" + ")):""}</b><b>${inr(e.amount)}</b></div>
+  <div class="mut">${e.date} · ${esc(e.by)} · ${esc(e.mode)}${e.note?" · "+esc(e.note):""}</div></div>`).join("");
+}
+
+/* ---------- Form ---------- */
+function openForm(id){
+  const e=id?db.entries.find(x=>x.id==id):null;
+  form=e?{...e,subs:[...(e.subs||[])]}:{date:new Date().toISOString().slice(0,10),amount:"",cat:"Groceries",subs:[],note:"",by:cfg.name,mode:"UPI"};
+  drawForm();$("#modal").classList.add("on");
+}
+function drawForm(){
+  const subs=CATS[form.cat]||[];
+  $("#sheet").innerHTML=`<h1>${form.id?"Edit":"Add"} expense</h1>
+  <label>Date</label><input type="date" id="f1" value="${form.date}">
+  <label>Amount (₹)</label><input type="number" inputmode="decimal" id="f2" value="${form.amount}">
+  <label>Category</label><select id="f3" onchange="form.cat=this.value;form.subs=[];keep();drawForm()">${Object.keys(CATS).map(c=>`<option ${c==form.cat?"selected":""}>${c}</option>`).join("")}</select>
+  ${subs.length?`<label>Which ones? Pick any, or none if you only know the total</label><div class="chips">${subs.map(s=>`<div class="chip ${form.subs.includes(s)?"on":""}" onclick="tg('${s}')">${s}</div>`).join("")}</div>`:""}
+  <label>Note</label><input id="f4" value="${esc(form.note)}">
+  <label>Paid by</label><input id="f5" value="${esc(form.by)}">
+  <label>Payment mode</label><select id="f6">${MODES.map(m=>`<option ${m==form.mode?"selected":""}>${m}</option>`).join("")}</select>
+  <div class="row"><button class="btn" onclick="submitForm()">Save</button><button class="btn g" onclick="closeForm()">Cancel</button>
+  ${form.id?`<button class="btn d" onclick="del(${form.id})">Delete</button>`:""}</div>`;
+}
+function keep(){["date:f1","amount:f2","note:f4","by:f5","mode:f6"].forEach(p=>{const[k,i]=p.split(":");const el=$("#"+i);if(el)form[k]=el.value})}
+function tg(s){keep();const i=form.subs.indexOf(s);i<0?form.subs.push(s):form.subs.splice(i,1);drawForm()}
+function closeForm(){$("#modal").classList.remove("on")}
+function submitForm(){
+  keep();const a=parseFloat(form.amount);
+  if(!(a>0))return err("Enter an amount");
+  if(!form.date)return err("Pick a date");
+  const rec={id:form.id||Date.now(),date:form.date,amount:a,cat:form.cat,subs:form.subs,note:form.note.trim(),by:form.by.trim()||cfg.name,mode:form.mode};
+  closeForm();
+  run(()=>save(()=>{const i=db.entries.findIndex(x=>x.id==rec.id);i<0?db.entries.push(rec):db.entries[i]=rec}));
+}
+function del(id){
+  if(!confirm("Delete this entry?"))return;
+  closeForm();run(()=>save(()=>{db.entries=db.entries.filter(x=>x.id!=id)}));
+}
+function exportCsv(){
+  const q=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
+  const rows=[["Date","Amount","Category","Sub","Note","Paid by","Mode"],...db.entries.sort((a,b)=>a.date.localeCompare(b.date)).map(e=>[e.date,e.amount,e.cat,(e.subs||[]).join(" + "),e.note,e.by,e.mode])];
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([rows.map(r=>r.map(q).join(",")).join("\n")],{type:"text/csv"}));
+  a.download="expenses.csv";a.click();
+}
+cfg?start():setup();
+</script>
+</body>
+</html>
